@@ -24,4 +24,4 @@ loss.backward()
 
 print(f"  ✓ Model Output Shape: {output.shape}")
 print(f"  ✓ Spatial Focal Loss: {loss.item():.4f}")
-print("🚀 Hybrid CNN+GCN architecture and CUDA memory allocation verified on RTX 4050!")
+print(" Hybrid CNN+GCN architecture and CUDA memory allocation verified on RTX 4050!")
