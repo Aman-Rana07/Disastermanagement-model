@@ -1,93 +1,51 @@
-# ═══════════════════════════════════════════════
-# losses.py — Focal Loss for flood prediction
-# ═══════════════════════════════════════════════
+"""Masked losses for imbalanced binary flood segmentation."""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os, sys
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 from config import FOCAL_ALPHA, FOCAL_GAMMA
 
 
-class FocalLoss(nn.Module):
-    """
-    Focal Loss for binary flood segmentation.
+class CombinedLoss(nn.Module):
+    """Focal BCE plus soft Dice, ignoring pixels marked invalid."""
 
-    WHY Focal Loss over BCE:
-    Flood pixels are spatially rare vs non-flood pixels.
-    Standard BCE treats all pixels equally — the model learns
-    to predict "not flooded" everywhere and still gets 80%+ accuracy.
-    Focal Loss down-weights easy correct predictions (non-flood pixels
-    the model is confident about) and focuses training on hard cases
-    (flood boundaries, partially submerged areas).
-
-    Formula: FL = -α(1-pt)^γ * log(pt)
-    γ=2 means a well-classified pixel contributes 4× less to loss
-    than a misclassified pixel.
-    """
-    def __init__(self, alpha=None, gamma=None):
+    def __init__(self, weight_focal=0.6, weight_dice=0.4,
+                 alpha=FOCAL_ALPHA, gamma=FOCAL_GAMMA, smooth=1.0):
         super().__init__()
-        self.alpha = alpha if alpha is not None else FOCAL_ALPHA
-        self.gamma = gamma if gamma is not None else FOCAL_GAMMA
-
-    def forward(self, pred, target):
-        """
-        Args:
-            pred:   (B,) or (B,1) float — predicted flood probability
-            target: (B,) float — ground truth (0 or 1)
-        """
-        pred   = pred.squeeze()
-        target = target.float().squeeze()
-
-        # Clamp for numerical stability
-        pred   = torch.clamp(pred, 1e-7, 1 - 1e-7)
-        bce    = F.binary_cross_entropy(pred, target, reduction='none')
-        pt     = torch.exp(-bce)
-        focal  = self.alpha * (1 - pt) ** self.gamma * bce
-        return focal.mean()
-
-
-class DiceLoss(nn.Module):
-    """
-    Dice Loss for pixel-level segmentation.
-    Measures overlap between prediction and ground truth.
-    Particularly effective for imbalanced classes.
-
-    Formula: Dice = 1 - (2|A∩B|) / (|A| + |B|)
-    """
-    def __init__(self, smooth=1.0):
-        super().__init__()
+        self.weight_focal = weight_focal
+        self.weight_dice = weight_dice
+        self.alpha = alpha
+        self.gamma = gamma
         self.smooth = smooth
 
-    def forward(self, pred, target):
-        pred   = pred.squeeze().float()
-        target = target.squeeze().float()
+    def forward(self, logits, target, valid_mask=None):
+        if logits.shape != target.shape:
+            raise ValueError(
+                f"Logit and target shapes differ: {logits.shape} vs {target.shape}."
+            )
+        target = target.float()
+        if valid_mask is None:
+            valid_mask = torch.ones_like(target, dtype=torch.bool)
+        else:
+            valid_mask = valid_mask.bool()
+        if valid_mask.shape != target.shape:
+            raise ValueError("Validity mask must have the same shape as target.")
+        if not valid_mask.any():
+            raise ValueError("Batch contains no valid labeled pixels.")
 
-        intersection = (pred * target).sum()
-        dice = (2. * intersection + self.smooth) / (
-            pred.sum() + target.sum() + self.smooth)
-        return 1 - dice
+        valid_float = valid_mask.float()
+        bce = F.binary_cross_entropy_with_logits(logits, target, reduction="none")
+        probabilities = torch.sigmoid(logits)
+        pt = torch.exp(-bce)
+        alpha_factor = self.alpha * target + (1.0 - self.alpha) * (1.0 - target)
+        focal = alpha_factor * (1.0 - pt).pow(self.gamma) * bce
+        focal_loss = (focal * valid_float).sum() / valid_float.sum()
 
-
-class CombinedLoss(nn.Module):
-    """
-    Combined Focal + Dice Loss.
-    Focal handles class imbalance at pixel level.
-    Dice handles spatial overlap between predicted and actual flood extent.
-    Together they optimize both precision and spatial accuracy.
-
-    weight_focal + weight_dice should sum to 1.0
-    """
-    def __init__(self, weight_focal=0.6, weight_dice=0.4):
-        super().__init__()
-        self.focal        = FocalLoss()
-        self.dice         = DiceLoss()
-        self.weight_focal = weight_focal
-        self.weight_dice  = weight_dice
-
-    def forward(self, pred, target):
-        l_focal = self.focal(pred, target)
-        l_dice  = self.dice(pred, target)
-        return (self.weight_focal * l_focal +
-                self.weight_dice  * l_dice)
+        probabilities = probabilities * valid_float
+        target = target * valid_float
+        intersection = (probabilities * target).sum()
+        dice = (2 * intersection + self.smooth) / (
+            probabilities.sum() + target.sum() + self.smooth
+        )
+        return self.weight_focal * focal_loss + self.weight_dice * (1.0 - dice)

@@ -1,0 +1,247 @@
+{
+  "study": "2022 Cachar flood-event mapping within Assam, India",
+  "input": "C:\\Users\\Aman Rana\\Desktop\\Assam'\\data\\public_assam_2022\\sentinel1\\assam_cachar_s1_vv_vh_20220710_20220720.tif",
+  "input_sensor": "Copernicus Sentinel-1 VV/VH",
+  "input_acquisition_window": "2022-07-10 through 2022-07-20, median composite",
+  "reference": {
+    "source": "NRSC/ISRO Cachar flood map issued 2022-07-17",
+    "pre_flood_image": "IRS Resourcesat-2 AWiFS acquired 2022-03-02",
+    "post_flood_image": "IRS Resourcesat-2 AWiFS acquired 2022-07-14",
+    "label_method": "Digitized post-panel cyan pixels minus pre-panel cyan pixels from the false-colour map PDF, then nearest-neighbor aligned to Sentinel-1.",
+    "quality": "Provisional map-derived proxy; not an official vector flood mask, field survey, or independent ground truth."
+  },
+  "spatial_split": {
+    "seed": 42,
+    "split_unit": "512 x 512 Sentinel-1 pixels (non-overlapping spatial blocks)",
+    "patch_counts": {
+      "train": 1532,
+      "valid": 311,
+      "test": 516
+    },
+    "block_counts": {
+      "train": 114,
+      "valid": 23,
+      "test": 38
+    },
+    "proxy_positive_fraction_by_split": {
+      "train": 0.2756,
+      "valid": 0.2844,
+      "test": 0.2719
+    },
+    "test_scope": "held-out spatial blocks from Cachar NRSC map area"
+  },
+  "model_settings": {
+    "patch_size": 128,
+    "batch_size": 8,
+    "max_epochs": 12,
+    "early_stopping_patience": 3,
+    "transformer": {
+      "hidden_channels": 32,
+      "attention_heads": 4,
+      "layers": 2,
+      "tokens_per_patch": 256
+    },
+    "device": "cuda",
+    "classes": "0=map non-cyan, 1=post-only cyan, 255=unknown"
+  },
+  "threshold_source": "Selected on held-out validation spatial blocks; test blocks were not used for threshold selection.",
+  "uncertainty_estimation": {
+    "method": "Percentile bootstrap resampling of held-out spatial blocks with replacement; 95% intervals for accuracy and F1.",
+    "iterations": 1000,
+    "test_spatial_blocks": 38,
+    "interpretation": "Intervals quantify spatial-block sampling variability for agreement with this proxy; they do not correct proxy-label errors or represent field-validated flood accuracy."
+  },
+  "results": {
+    "vh_threshold": {
+      "threshold": 0.5500000000000002,
+      "test_metrics": {
+        "accuracy": 0.7757616639137268,
+        "precision": 0.6001940369606018,
+        "recall": 0.5250973105430603,
+        "f1": 0.5601398944854736,
+        "brier": 0.19692856073379517,
+        "TP": 1165380,
+        "FP": 776292,
+        "FN": 1053980,
+        "TN": 5166520,
+        "valid_pixels": 8162172
+      },
+      "spatial_block_bootstrap_95ci": {
+        "accuracy": [
+          0.7313886902288608,
+          0.8131549294658645
+        ],
+        "f1": [
+          0.4661495604429121,
+          0.6235598298438679
+        ]
+      },
+      "prediction_collapsed_to_all_positive": false
+    },
+    "cnn": {
+      "threshold": 0.5000000000000001,
+      "test_metrics": {
+        "accuracy": 0.8377661108970642,
+        "precision": 0.6521540284156799,
+        "recall": 0.8644081950187683,
+        "f1": 0.7434278130531311,
+        "brier": 0.2065393328666687,
+        "TP": 1918433,
+        "FP": 1023254,
+        "FN": 300927,
+        "TN": 4919558,
+        "valid_pixels": 8162172
+      },
+      "spatial_block_bootstrap_95ci": {
+        "accuracy": [
+          0.8073751221296055,
+          0.8655471851069292
+        ],
+        "f1": [
+          0.6621760068910532,
+          0.7967660137940662
+        ]
+      },
+      "prediction_collapsed_to_all_positive": false,
+      "validation_metrics": {
+        "accuracy": 0.8380725383758545,
+        "precision": 0.6680048704147339,
+        "recall": 0.8559496998786926,
+        "f1": 0.750387966632843,
+        "brier": 0.20484404265880585,
+        "TP": 1180376,
+        "FP": 586641,
+        "FN": 198649,
+        "TN": 2883974,
+        "valid_pixels": 4849640
+      },
+      "best_epoch": 9
+    },
+    "gcn": {
+      "threshold": 0.5500000000000002,
+      "test_metrics": {
+        "accuracy": 0.2717282772064209,
+        "precision": 0.2717686891555786,
+        "recall": 0.9992709755897522,
+        "f1": 0.42732033133506775,
+        "brier": 0.28670576214790344,
+        "TP": 2217742,
+        "FP": 5942661,
+        "FN": 1618,
+        "TN": 151,
+        "valid_pixels": 8162172
+      },
+      "spatial_block_bootstrap_95ci": {
+        "accuracy": [
+          0.18014804574444324,
+          0.3744411040696688
+        ],
+        "f1": [
+          0.30528558877863626,
+          0.5448466967136344
+        ]
+      },
+      "prediction_collapsed_to_all_positive": false,
+      "validation_metrics": {
+        "accuracy": 0.28436872363090515,
+        "precision": 0.28435760736465454,
+        "recall": 0.9999825954437256,
+        "f1": 0.4427996277809143,
+        "brier": 0.28489193320274353,
+        "TP": 1379001,
+        "FP": 3470530,
+        "FN": 24,
+        "TN": 85,
+        "valid_pixels": 4849640
+      },
+      "best_epoch": 1
+    },
+    "cnn_gcn": {
+      "threshold": 0.5000000000000001,
+      "test_metrics": {
+        "accuracy": 0.8757473826408386,
+        "precision": 0.7322211265563965,
+        "recall": 0.8561265468597412,
+        "f1": 0.7893409729003906,
+        "brier": 0.18230988085269928,
+        "TP": 1900053,
+        "FP": 694864,
+        "FN": 319307,
+        "TN": 5247948,
+        "valid_pixels": 8162172
+      },
+      "spatial_block_bootstrap_95ci": {
+        "accuracy": [
+          0.8383962472129355,
+          0.9089625662776238
+        ],
+        "f1": [
+          0.7215088955737715,
+          0.8327905085254032
+        ]
+      },
+      "prediction_collapsed_to_all_positive": false,
+      "validation_metrics": {
+        "accuracy": 0.8755895495414734,
+        "precision": 0.7470219135284424,
+        "recall": 0.8505067229270935,
+        "f1": 0.795412540435791,
+        "brier": 0.18060675263404846,
+        "TP": 1172870,
+        "FP": 397191,
+        "FN": 206155,
+        "TN": 3073424,
+        "valid_pixels": 4849640
+      },
+      "best_epoch": 8
+    },
+    "cnn_gcn_transformer": {
+      "threshold": 0.6000000000000002,
+      "test_metrics": {
+        "accuracy": 0.8788989186286926,
+        "precision": 0.7308156490325928,
+        "recall": 0.8780351281166077,
+        "f1": 0.79768967628479,
+        "brier": 0.09550447762012482,
+        "TP": 1948676,
+        "FP": 717764,
+        "FN": 270684,
+        "TN": 5225048,
+        "valid_pixels": 8162172
+      },
+      "spatial_block_bootstrap_95ci": {
+        "accuracy": [
+          0.8403711547852422,
+          0.9152934595305182
+        ],
+        "f1": [
+          0.7322149404450233,
+          0.8405265774860268
+        ]
+      },
+      "prediction_collapsed_to_all_positive": false,
+      "validation_metrics": {
+        "accuracy": 0.8750519752502441,
+        "precision": 0.7411109209060669,
+        "recall": 0.8615572452545166,
+        "f1": 0.796808123588562,
+        "brier": 0.09846938401460648,
+        "TP": 1188109,
+        "FP": 415037,
+        "FN": 190916,
+        "TN": 3055578,
+        "valid_pixels": 4849640
+      },
+      "best_epoch": 11
+
+    }
+  },
+  "prediction_paths": {
+    "vh_threshold": "C:\\Users\\Aman Rana\\Desktop\\Assam'\\data\\exports\\assam_2022\\trained\\predictions\\vh_threshold_prediction.tif",
+    "cnn": "C:\\Users\\Aman Rana\\Desktop\\Assam'\\data\\exports\\assam_2022\\trained\\predictions\\cnn_prediction.tif",
+    "gcn": "C:\\Users\\Aman Rana\\Desktop\\Assam'\\data\\exports\\assam_2022\\trained\\predictions\\gcn_prediction.tif",
+    "cnn_gcn": "C:\\Users\\Aman Rana\\Desktop\\Assam'\\data\\exports\\assam_2022\\trained\\predictions\\cnn_gcn_prediction.tif",
+    "cnn_gcn_transformer": "C:\\Users\\Aman Rana\\Desktop\\Assam'\\data\\exports\\assam_2022\\trained\\predictions\\cnn_gcn_transformer_prediction.tif"
+  },
+  "metrics_interpretation": "These are spatial holdout agreement scores against a provisional false-colour NRSC-map-derived proxy. They are not field-validated flood accuracy and may reflect PDF color-digitization errors."
+}

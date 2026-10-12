@@ -1,87 +1,100 @@
-# ═══════════════════════════════════════════════
-# evaluate.py — Metrics, confusion matrix, plots
-# ═══════════════════════════════════════════════
+"""Pixel-level binary segmentation metrics."""
 
 import torch
-import numpy as np
-import os, sys
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 from config import DEVICE
 
 
-def compute_metrics(preds, labels, threshold=0.5):
-    """
-    Compute all flood prediction metrics.
-    WHY these specific metrics:
-    - Accuracy: overall but misleading for imbalanced data
-    - Precision: don't raise false flood alarms
-    - Recall: MOST IMPORTANT — never miss an actual flood
-    - F1: balance of precision and recall
-    - IoU: standard for segmentation tasks
-    """
-    preds  = (preds > threshold).float()
-    labels = labels.float()
+def compute_metrics(probabilities, labels, valid_mask=None, threshold=0.5):
+    """Compute thresholded metrics over valid pixels only."""
+    probabilities = probabilities.float().reshape(-1)
+    labels = labels.float().reshape(-1)
+    if probabilities.shape != labels.shape:
+        raise ValueError("Prediction and label arrays must have equal size.")
+    if valid_mask is not None:
+        valid_mask = valid_mask.bool().reshape(-1)
+        if valid_mask.shape != labels.shape:
+            raise ValueError("Validity mask and labels must have equal size.")
+        probabilities = probabilities[valid_mask]
+        labels = labels[valid_mask]
+    if probabilities.numel() == 0:
+        raise ValueError("Cannot evaluate a set with no valid labeled pixels.")
 
-    TP = ((preds == 1) & (labels == 1)).sum().float()
-    FP = ((preds == 1) & (labels == 0)).sum().float()
-    FN = ((preds == 0) & (labels == 1)).sum().float()
-    TN = ((preds == 0) & (labels == 0)).sum().float()
-
-    precision = TP / (TP + FP + 1e-8)
-    recall    = TP / (TP + FN + 1e-8)
-    f1        = 2 * precision * recall / (precision + recall + 1e-8)
-    iou       = TP / (TP + FP + FN + 1e-8)
-    accuracy  = (TP + TN) / (TP + FP + FN + TN + 1e-8)
-
+    predicted = probabilities >= threshold
+    actual = labels >= 0.5
+    tp = (predicted & actual).sum().float()
+    fp = (predicted & ~actual).sum().float()
+    fn = (~predicted & actual).sum().float()
+    tn = (~predicted & ~actual).sum().float()
+    eps = 1e-8
+    precision = tp / (tp + fp + eps)
+    recall = tp / (tp + fn + eps)
+    f1 = 2 * precision * recall / (precision + recall + eps)
+    accuracy = (tp + tn) / (tp + fp + fn + tn + eps)
+    brier = ((probabilities - labels) ** 2).mean()
     return {
-        'accuracy':  accuracy.item(),
-        'precision': precision.item(),
-        'recall':    recall.item(),
-        'f1':        f1.item(),
-        'iou':       iou.item(),
-        'TP': int(TP), 'FP': int(FP),
-        'FN': int(FN), 'TN': int(TN)
+        "accuracy": accuracy.item(),
+        "precision": precision.item(),
+        "recall": recall.item(),
+        "f1": f1.item(),
+        "brier": brier.item(),
+        "TP": int(tp.item()),
+        "FP": int(fp.item()),
+        "FN": int(fn.item()),
+        "TN": int(tn.item()),
+        "valid_pixels": int(probabilities.numel()),
     }
 
 
 @torch.no_grad()
-def evaluate_model(model, loader, edge_index, device=None):
-    """
-    Run evaluation on a DataLoader.
-    Returns averaged metrics across all batches.
-    """
+def evaluate_model(model, loader, device=None, threshold=0.5):
     if device is None:
-        device = torch.device(DEVICE)
-
+        device = torch.device(DEVICE if torch.cuda.is_available() else "cpu")
     model.eval()
-    all_preds  = []
-    all_labels = []
+    totals = torch.zeros(6, dtype=torch.float64)
+    for images, labels, valid in loader:
+        probabilities = torch.sigmoid(model(images.to(device))).cpu()
+        labels = labels.cpu()
+        valid = valid.cpu().bool()
+        if not valid.any():
+            continue
+        predicted = probabilities[valid] >= threshold
+        actual = labels[valid] >= 0.5
+        totals += torch.tensor(
+            [
+                (predicted & actual).sum().item(),
+                (predicted & ~actual).sum().item(),
+                (~predicted & actual).sum().item(),
+                (~predicted & ~actual).sum().item(),
+                ((probabilities[valid] - labels[valid]) ** 2).sum().item(),
+                valid.sum().item(),
+            ],
+            dtype=torch.float64,
+        )
+    if totals[5].item() == 0:
+        raise ValueError("Evaluation loader contains no batches.")
+    tp, fp, fn, tn, brier_sum, valid_pixels = totals.tolist()
+    precision = tp / (tp + fp + 1e-8)
+    recall = tp / (tp + fn + 1e-8)
+    return {
+        "accuracy": (tp + tn) / (tp + fp + fn + tn + 1e-8),
+        "precision": precision,
+        "recall": recall,
+        "f1": 2 * precision * recall / (precision + recall + 1e-8),
+        "brier": brier_sum / valid_pixels,
+        "TP": int(tp),
+        "FP": int(fp),
+        "FN": int(fn),
+        "TN": int(tn),
+        "valid_pixels": int(valid_pixels),
+    }
 
-    for images, labels, dist_ids in loader:
-        images   = images.to(device)
-        dist_ids = dist_ids.to(device)
 
-        preds = model(images, dist_ids, edge_index)
-        all_preds.append(preds.squeeze().cpu())
-        all_labels.append(labels.squeeze().cpu())
-
-    all_preds  = torch.cat(all_preds)
-    all_labels = torch.cat(all_labels)
-
-    metrics = compute_metrics(all_preds, all_labels)
-    return metrics, all_preds, all_labels
-
-
-def print_metrics(metrics, split='Val'):
-    """Pretty print metrics"""
-    print(f"\n{'─'*40}")
-    print(f"  {split} Results")
-    print(f"{'─'*40}")
-    print(f"  Accuracy:  {metrics['accuracy']:.4f}")
-    print(f"  Precision: {metrics['precision']:.4f}")
-    print(f"  Recall:    {metrics['recall']:.4f}  ← most important")
-    print(f"  F1 Score:  {metrics['f1']:.4f}")
-    print(f"  IoU:       {metrics['iou']:.4f}")
-    print(f"  TP:{metrics['TP']}  FP:{metrics['FP']}  "
-          f"FN:{metrics['FN']}  TN:{metrics['TN']}")
-    print(f"{'─'*40}\n")
+def print_metrics(metrics, split="Validation"):
+    print(f"\n{split} metrics (valid pixels: {metrics['valid_pixels']:,})")
+    for name in ("accuracy", "precision", "recall", "f1", "brier"):
+        print(f"  {name.title():10s}: {metrics[name]:.4f}")
+    print(
+        f"  TP:{metrics['TP']} FP:{metrics['FP']} "
+        f"FN:{metrics['FN']} TN:{metrics['TN']}"
+    )
